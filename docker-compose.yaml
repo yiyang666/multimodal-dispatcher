@@ -1,0 +1,26 @@
+name: llm-dispatcher
+
+services:
+  dispatcher:
+    build: .
+    container_name: llm-dispatcher
+    restart: unless-stopped
+    ports:
+      - "${DISPATCHER_BIND_IP}:8000:8000"
+    environment:
+      DISPATCHER_ADMIN_TOKEN: "${DISPATCHER_ADMIN_TOKEN}"
+      MODELS_FILE: "${MODELS_FILE:-/app/config/models.yaml}"
+      IDLE_TIMEOUT_SECONDS: "${IDLE_TIMEOUT_SECONDS:-600}"
+      IDLE_CHECK_INTERVAL_SECONDS: "${IDLE_CHECK_INTERVAL_SECONDS:-30}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./config:/app/config:ro
+      # Qwen-Image 文生图 API 工作流
+      - ./deploy/qwen_image_t2i_api.json:/app/workflows/qwen_image_t2i_api.json:ro
+    networks:
+      - backplane
+
+networks:
+  backplane:
+    name: llm-backplane
+    external: true

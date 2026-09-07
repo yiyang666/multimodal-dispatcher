@@ -1,0 +1,35 @@
+models:
+  agent-6000ada:
+    kind: vllm
+    enabled: true
+    container: agent-6000ada
+    base_url: http://agent-6000ada:8000
+    readiness_path: /v1/models
+    # Current WSL/CUDA stack cannot use vLLM's CUDA virtual-memory sleep allocator.
+    sleep_supported: false
+    capabilities: [text, vision]
+
+  coder-6000ada:
+    kind: vllm
+    enabled: false
+    container: coder-6000ada
+    base_url: http://coder-6000ada:8000
+    readiness_path: /v1/models
+    sleep_supported: false
+    capabilities: [text]
+
+  image-6000ada:
+    kind: comfyui
+    enabled: true
+    container: comfy-image-6000ada
+    base_url: http://comfy-image-6000ada:8188
+    readiness_path: /system_stats
+    capabilities: [image_generation]
+
+  video-6000ada:
+    kind: comfyui
+    enabled: false
+    container: comfy-video-6000ada
+    base_url: http://comfy-video-6000ada:8188
+    readiness_path: /system_stats
+    capabilities: [video_generation]

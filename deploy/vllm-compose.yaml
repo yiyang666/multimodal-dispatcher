@@ -1,0 +1,40 @@
+name: llm-stack
+
+services:
+  agent-6000ada:
+    image: vllm/vllm-openai:v0.28.0
+    container_name: agent-6000ada
+    restart: unless-stopped
+    gpus: all
+    ports:
+      - "127.0.0.1:8101:8000"
+    networks:
+      - backplane
+    environment:
+      HF_HUB_DISABLE_XET: "1"
+    volumes:
+      - "${HOME}/.cache/huggingface:/root/.cache/huggingface"
+      - "${HOME}/.cache/vllm:/root/.cache/vllm"
+      - "${HOME}/models:/models"
+    command:
+      - Qwen/Qwen3.8-27B-FP8
+      - --served-model-name
+      - agent-6000ada
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --max-model-len
+      - "32768"
+      - --max-num-seqs
+      - "128"
+      - --gpu-memory-utilization
+      - "0.80"
+      - --trust-remote-code
+      - --reasoning-parser
+      - qwen3
+
+networks:
+  backplane:
+    name: llm-backplane
+    external: true

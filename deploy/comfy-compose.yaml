@@ -1,0 +1,32 @@
+# ComfyUI 图像后端（Qwen-Image FP8）
+# 合并进 ~/llm-stack/compose.yaml，或单独：
+#   docker compose -f deploy/comfy-compose.yaml up -d --no-start
+name: llm-stack
+
+services:
+  comfy-image-6000ada:
+    image: yanwk/comfyui-boot:cu126-slim
+    container_name: comfy-image-6000ada
+    init: true
+    # 由 Dispatcher 按需 start；平时可保持 stopped 或运行后 /free
+    restart: unless-stopped
+    gpus: all
+    ports:
+      - "127.0.0.1:8188:8188"
+    networks:
+      - backplane
+    environment:
+      # 监听全接口以便 Docker 网络访问；宿主机仅绑定 127.0.0.1
+      CLI_ARGS: "--listen 0.0.0.0 --port 8188"
+    volumes:
+      - "${HOME}/llm-stack/comfyui/root:/root"
+      - "${HOME}/llm-stack/comfyui/models:/root/ComfyUI/models"
+      - "${HOME}/.cache/huggingface/hub:/root/.cache/huggingface/hub"
+      - "${HOME}/llm-stack/comfyui/input:/root/ComfyUI/input"
+      - "${HOME}/llm-stack/comfyui/output:/root/ComfyUI/output"
+      - "${HOME}/llm-stack/comfyui/workflows:/root/ComfyUI/user/default/workflows"
+
+networks:
+  backplane:
+    name: llm-backplane
+    external: true
