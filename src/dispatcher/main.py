@@ -323,9 +323,9 @@ async def chat_completions(request: Request) -> Response:
     return await proxy(request, model, "/v1/chat/completions")
 
 
-def _load_comfy_workflow() -> dict[str, Any]:
-    # Qwen-Image 文生图 API 工作流模板；部署时挂载到 /app/workflows
-    path = Path(os.environ.get("COMFY_T2I_WORKFLOW", "/app/workflows/qwen_image_t2i_api.json"))
+def _load_comfy_workflow(env_key: str, default_path: str) -> dict[str, Any]:
+    # ComfyUI API 工作流模板；部署时挂载到 /app/workflows
+    path = Path(os.environ.get(env_key, default_path))
     if not path.is_file():
         raise HTTPException(503, f"ComfyUI workflow template missing: {path}")
     return json.loads(path.read_text())
@@ -345,12 +345,7 @@ def _parse_image_size(size: str | None) -> tuple[int, int]:
     return width, height
 
 
-async def _comfy_generate(model: Model, payload: dict[str, Any]) -> dict[str, Any]:
-    prompt = payload.get("prompt")
-    if not isinstance(prompt, str) or not prompt.strip():
-        raise HTTPException(400, "prompt is required")
-
-    width, height = _parse_image_size(payload.get("size"))
+def _parse_sampler_knobs(payload: dict[str, Any]) -> tuple[int, int, float, str]:
     seed = payload.get("seed")
     if seed is None:
         seed = uuid.uuid4().int % (2**31)
@@ -358,33 +353,19 @@ async def _comfy_generate(model: Model, payload: dict[str, Any]) -> dict[str, An
         seed = int(seed)
     except (TypeError, ValueError) as exc:
         raise HTTPException(400, "seed must be an integer") from exc
-
     steps = int(payload.get("steps") or os.environ.get("COMFY_T2I_STEPS", "30"))
     cfg = float(payload.get("cfg_scale") or os.environ.get("COMFY_T2I_CFG", "4"))
     negative = payload.get("negative_prompt") or " "
+    if not isinstance(negative, str):
+        raise HTTPException(400, "negative_prompt must be a string")
+    return seed, steps, cfg, negative
 
-    workflow = copy.deepcopy(_load_comfy_workflow())
-    # 约定节点：6=正提示词，7=负提示词，3=KSampler，58=EmptySD3LatentImage
-    workflow["6"]["inputs"]["text"] = prompt
-    workflow["7"]["inputs"]["text"] = negative
-    workflow["3"]["inputs"]["seed"] = seed
-    workflow["3"]["inputs"]["steps"] = steps
-    workflow["3"]["inputs"]["cfg"] = cfg
-    workflow["58"]["inputs"]["width"] = width
-    workflow["58"]["inputs"]["height"] = height
 
-    client: httpx.AsyncClient = app.state.proxy
-    queue = await client.post(model.base_url + "/prompt", json={"prompt": workflow})
-    if queue.status_code >= 400:
-        raise HTTPException(502, f"ComfyUI prompt rejected: {queue.text[:500]}")
-    prompt_id = queue.json().get("prompt_id")
-    if not prompt_id:
-        raise HTTPException(502, "ComfyUI did not return prompt_id")
-
+async def _comfy_wait_images(client: httpx.AsyncClient, base_url: str, prompt_id: str) -> list[dict[str, str]]:
     deadline = asyncio.get_running_loop().time() + float(os.environ.get("COMFY_T2I_TIMEOUT", "600"))
     outputs: dict[str, Any] | None = None
     while asyncio.get_running_loop().time() < deadline:
-        history = await client.get(model.base_url + f"/history/{prompt_id}")
+        history = await client.get(base_url + f"/history/{prompt_id}")
         history.raise_for_status()
         item = history.json().get(prompt_id)
         if item and item.get("outputs"):
@@ -402,18 +383,132 @@ async def _comfy_generate(model: Model, payload: dict[str, Any]) -> dict[str, An
                 "subfolder": image.get("subfolder", ""),
                 "type": image.get("type", "output"),
             }
-            view = await client.get(model.base_url + "/view", params=params)
+            view = await client.get(base_url + "/view", params=params)
             view.raise_for_status()
             images.append({
                 "b64_json": base64.b64encode(view.content).decode("ascii"),
             })
     if not images:
         raise HTTPException(502, "ComfyUI finished without image outputs")
+    return images
+
+
+async def _comfy_queue(client: httpx.AsyncClient, base_url: str, workflow: dict[str, Any]) -> str:
+    queue = await client.post(base_url + "/prompt", json={"prompt": workflow})
+    if queue.status_code >= 400:
+        raise HTTPException(502, f"ComfyUI prompt rejected: {queue.text[:500]}")
+    prompt_id = queue.json().get("prompt_id")
+    if not prompt_id:
+        raise HTTPException(502, "ComfyUI did not return prompt_id")
+    return prompt_id
+
+
+def _decode_image_bytes(payload: dict[str, Any]) -> bytes:
+    # 支持 data URL / 纯 base64 / 远端 http(s) URL（由调用方解析后传入 bytes 字段）
+    raw = payload.get("image") or payload.get("image_b64") or payload.get("b64_json")
+    if isinstance(raw, str) and raw.strip():
+        text = raw.strip()
+        if text.startswith("data:") and "," in text:
+            text = text.split(",", 1)[1]
+        try:
+            return base64.b64decode(text, validate=False)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(400, "image must be valid base64") from exc
+    raise HTTPException(400, "image (base64) is required for edits")
+
+
+async def _comfy_upload_image(client: httpx.AsyncClient, base_url: str, content: bytes, filename: str) -> str:
+    files = {"image": (filename, content, "application/octet-stream")}
+    data = {"overwrite": "true"}
+    upload = await client.post(base_url + "/upload/image", files=files, data=data)
+    if upload.status_code >= 400:
+        raise HTTPException(502, f"ComfyUI upload rejected: {upload.text[:500]}")
+    name = upload.json().get("name")
+    if not isinstance(name, str) or not name:
+        raise HTTPException(502, "ComfyUI upload did not return image name")
+    return name
+
+
+async def _comfy_generate(model: Model, payload: dict[str, Any]) -> dict[str, Any]:
+    prompt = payload.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise HTTPException(400, "prompt is required")
+
+    width, height = _parse_image_size(payload.get("size"))
+    seed, steps, cfg, negative = _parse_sampler_knobs(payload)
+
+    workflow = copy.deepcopy(
+        _load_comfy_workflow("COMFY_T2I_WORKFLOW", "/app/workflows/qwen_image_t2i_api.json")
+    )
+    # 约定节点：6=正提示词，7=负提示词，3=KSampler，58=EmptySD3LatentImage
+    workflow["6"]["inputs"]["text"] = prompt
+    workflow["7"]["inputs"]["text"] = negative
+    workflow["3"]["inputs"]["seed"] = seed
+    workflow["3"]["inputs"]["steps"] = steps
+    workflow["3"]["inputs"]["cfg"] = cfg
+    workflow["58"]["inputs"]["width"] = width
+    workflow["58"]["inputs"]["height"] = height
+
+    client: httpx.AsyncClient = app.state.proxy
+    prompt_id = await _comfy_queue(client, model.base_url, workflow)
+    images = await _comfy_wait_images(client, model.base_url, prompt_id)
     return {
         "created": int(time.time()),
         "data": images,
         "model": model.id,
-        "meta": {"seed": seed, "steps": steps, "cfg_scale": cfg, "size": f"{width}x{height}"},
+        "meta": {"seed": seed, "steps": steps, "cfg_scale": cfg, "size": f"{width}x{height}", "mode": "t2i"},
+    }
+
+
+async def _comfy_edit(model: Model, payload: dict[str, Any]) -> dict[str, Any]:
+    prompt = payload.get("prompt")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise HTTPException(400, "prompt is required")
+
+    width, height = _parse_image_size(payload.get("size") or "1024x1024")
+    seed, steps, cfg, negative = _parse_sampler_knobs(payload)
+    denoise = float(payload.get("denoise") or payload.get("strength") or os.environ.get("COMFY_I2I_DENOISE", "0.75"))
+    if not (0.05 <= denoise <= 1.0):
+        raise HTTPException(400, "denoise/strength must be between 0.05 and 1.0")
+
+    image_bytes = _decode_image_bytes(payload)
+    client: httpx.AsyncClient = app.state.proxy
+    uploaded = await _comfy_upload_image(
+        client,
+        model.base_url,
+        image_bytes,
+        filename=f"edit_{uuid.uuid4().hex}.png",
+    )
+
+    workflow = copy.deepcopy(
+        _load_comfy_workflow("COMFY_I2I_WORKFLOW", "/app/workflows/qwen_image_i2i_api.json")
+    )
+    # 约定节点：10=LoadImage，11=ImageScale，6/7=提示词，3=KSampler
+    workflow["10"]["inputs"]["image"] = uploaded
+    workflow["11"]["inputs"]["width"] = width
+    workflow["11"]["inputs"]["height"] = height
+    workflow["6"]["inputs"]["text"] = prompt
+    workflow["7"]["inputs"]["text"] = negative
+    workflow["3"]["inputs"]["seed"] = seed
+    workflow["3"]["inputs"]["steps"] = steps
+    workflow["3"]["inputs"]["cfg"] = cfg
+    workflow["3"]["inputs"]["denoise"] = denoise
+
+    prompt_id = await _comfy_queue(client, model.base_url, workflow)
+    images = await _comfy_wait_images(client, model.base_url, prompt_id)
+    return {
+        "created": int(time.time()),
+        "data": images,
+        "model": model.id,
+        "meta": {
+            "seed": seed,
+            "steps": steps,
+            "cfg_scale": cfg,
+            "size": f"{width}x{height}",
+            "denoise": denoise,
+            "mode": "i2i",
+            "source": uploaded,
+        },
     }
 
 
@@ -427,6 +522,22 @@ async def images(request: Request) -> JSONResponse:
         if model.kind != "comfyui":
             raise HTTPException(400, f"{model_id} is not a ComfyUI backend")
         result = await _comfy_generate(model, payload)
+        return JSONResponse(result)
+    finally:
+        scheduler.release()
+
+
+@app.post("/v1/images/edits")
+async def image_edits(request: Request) -> JSONResponse:
+    # OpenAI-ish 图生图：JSON body，image 为 base64（MCP / 本地客户端主通路）
+    payload = await request.json()
+    model_id = payload.get("model", "image-6000ada")
+    scheduler: Scheduler = request.app.state.scheduler
+    model = await scheduler.activate(model_id, reserve=True)
+    try:
+        if model.kind != "comfyui":
+            raise HTTPException(400, f"{model_id} is not a ComfyUI backend")
+        result = await _comfy_edit(model, payload)
         return JSONResponse(result)
     finally:
         scheduler.release()
