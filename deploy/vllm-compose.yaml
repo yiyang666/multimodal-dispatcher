@@ -33,6 +33,10 @@ services:
       - --trust-remote-code
       - --reasoning-parser
       - qwen3
+      # OpenClaw / 飞书会发 tool_choice=auto，必须显式开启工具调用
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - qwen3_xml
 
 networks:
   backplane:
