@@ -12,11 +12,14 @@ services:
       MODELS_FILE: "${MODELS_FILE:-/app/config/models.yaml}"
       IDLE_TIMEOUT_SECONDS: "${IDLE_TIMEOUT_SECONDS:-600}"
       IDLE_CHECK_INTERVAL_SECONDS: "${IDLE_CHECK_INTERVAL_SECONDS:-30}"
+      SWITCH_WAIT_TIMEOUT_SECONDS: "${SWITCH_WAIT_TIMEOUT_SECONDS:-900}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./config:/app/config:ro
       # Qwen-Image 文生图 API 工作流
       - ./deploy/qwen_image_t2i_api.json:/app/workflows/qwen_image_t2i_api.json:ro
+      # Qwen-Image 图生图 API 工作流
+      - ./deploy/qwen_image_i2i_api.json:/app/workflows/qwen_image_i2i_api.json:ro
     networks:
       - backplane
 

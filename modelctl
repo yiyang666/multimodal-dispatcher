@@ -1,0 +1,256 @@
+#!/usr/bin/env python3
+"""Human-friendly local CLI for Multimodal Dispatcher."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+from typing import Any
+
+PROJECT_DIR = Path(__file__).resolve().parent
+
+
+class CliError(RuntimeError):
+    pass
+
+
+def load_dotenv(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    if not path.is_file():
+        return values
+    for raw_line in path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.removeprefix("export ").split("=", 1)
+        values[key.strip()] = value.strip().strip("'\"")
+    return values
+
+
+def configuration(args: argparse.Namespace) -> tuple[str, str | None, Path]:
+    env_file = Path(
+        args.env_file or os.environ.get("MODELCTL_ENV_FILE", "") or PROJECT_DIR / ".env"
+    ).expanduser()
+    file_env = load_dotenv(env_file)
+    bind_ip = os.environ.get("DISPATCHER_BIND_IP") or file_env.get(
+        "DISPATCHER_BIND_IP", "127.0.0.1"
+    )
+    if bind_ip in {"0.0.0.0", "::", ""}:
+        bind_ip = "127.0.0.1"
+    base_url = (
+        args.url
+        or os.environ.get("DISPATCHER_URL")
+        or file_env.get("DISPATCHER_URL")
+        or f"http://{bind_ip}:8000"
+    ).rstrip("/")
+    base_url = base_url.removesuffix("/v1")
+    token = (
+        args.token
+        or os.environ.get("DISPATCHER_ADMIN_TOKEN")
+        or file_env.get("DISPATCHER_ADMIN_TOKEN")
+    )
+    return base_url, token, env_file
+
+
+class Client:
+    def __init__(self, base_url: str, token: str | None, timeout: float) -> None:
+        self.base_url = base_url
+        self.token = token
+        self.timeout = timeout
+
+    def request(self, method: str, path: str, *, admin: bool = False) -> Any:
+        headers = {"Accept": "application/json"}
+        if admin:
+            if not self.token:
+                raise CliError(
+                    "Admin token not found. Set it in .env or DISPATCHER_ADMIN_TOKEN."
+                )
+            headers["X-Dispatcher-Token"] = self.token
+        request = urllib.request.Request(
+            self.base_url + path,
+            data=b"" if method != "GET" else None,
+            headers=headers,
+            method=method,
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                return json.loads(response.read())
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", "replace")
+            try:
+                message = json.loads(body).get("detail", body)
+            except json.JSONDecodeError:
+                message = body
+            raise CliError(f"Dispatcher returned HTTP {exc.code}: {message}") from exc
+        except urllib.error.URLError as exc:
+            raise CliError(
+                f"Cannot reach Dispatcher at {self.base_url}: {exc.reason}"
+            ) from exc
+
+
+def state_for(row: dict[str, Any]) -> str:
+    if not row.get("enabled"):
+        return "planned"
+    if row.get("active"):
+        return "active"
+    if row.get("running") and row.get("ready"):
+        return "idle"
+    if row.get("running"):
+        return "starting"
+    return "stopped"
+
+
+def print_table(rows: list[dict[str, Any]]) -> None:
+    headings = ("MODEL", "KIND", "STATE", "CONTAINER")
+    values = [
+        (
+            str(row["id"]),
+            str(row.get("kind", "-")),
+            state_for(row),
+            str(row.get("container", "-")),
+        )
+        for row in rows
+    ]
+    widths = [len(value) for value in headings]
+    for row in values:
+        widths = [max(width, len(value)) for width, value in zip(widths, row)]
+    pattern = "  ".join(f"{{:<{width}}}" for width in widths)
+    print(pattern.format(*headings))
+    for row in values:
+        print(pattern.format(*row))
+
+
+def command_list(client: Client) -> None:
+    if client.token:
+        print_table(client.request("GET", "/admin/status", admin=True)["models"])
+        return
+    models = client.request("GET", "/v1/models")["data"]
+    for model in models:
+        print(model["id"])
+
+
+def command_status(client: Client) -> None:
+    status = client.request("GET", "/admin/status", admin=True)
+    print(f"Dispatcher: {client.base_url}")
+    print(f"Active:     {status.get('active') or 'none'}")
+    print(f"In flight:  {status.get('inflight', 0)}")
+    print(
+        f"Idle:       {status.get('idle_seconds', 0)}s / {status.get('idle_timeout_seconds', 0)}s"
+    )
+    print()
+    print_table(status["models"])
+
+
+def command_use(client: Client, model_id: str) -> None:
+    print(f"Activating {model_id}; this may take several minutes on a cold start...")
+    encoded_id = urllib.parse.quote(model_id, safe="")
+    result = client.request("POST", f"/admin/activate/{encoded_id}", admin=True)
+    print(f"Ready: {result['active']}")
+
+
+def command_release(client: Client, model_id: str | None) -> None:
+    path = (
+        f"/admin/release/{urllib.parse.quote(model_id, safe='')}"
+        if model_id
+        else "/admin/release"
+    )
+    result = client.request("POST", path, admin=True)
+    if result.get("released"):
+        print(f"Released: {result['released']}")
+    else:
+        print("No active model to release.")
+
+
+def command_logs(client: Client, model_id: str, follow: bool, tail: int) -> None:
+    if model_id == "dispatcher":
+        container = "llm-dispatcher"
+    else:
+        rows = client.request("GET", "/admin/status", admin=True)["models"]
+        match = next((row for row in rows if row["id"] == model_id), None)
+        if match is None:
+            raise CliError(f"Unknown model: {model_id}")
+        container = match["container"]
+    command = ["docker", "logs", "--tail", str(tail)]
+    if follow:
+        command.append("--follow")
+    command.append(container)
+    try:
+        raise SystemExit(subprocess.run(command, check=False).returncode)
+    except FileNotFoundError as exc:
+        raise CliError("docker command not found") from exc
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="modelctl",
+        description="Manage models through Multimodal Dispatcher.",
+    )
+    parser.add_argument("--url", help="Dispatcher URL (or DISPATCHER_URL)")
+    parser.add_argument(
+        "--token", help="admin token (prefer .env or DISPATCHER_ADMIN_TOKEN)"
+    )
+    parser.add_argument("--env-file", help="path to Dispatcher .env")
+    parser.add_argument(
+        "--timeout", type=float, default=1800, help="request timeout in seconds"
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers.add_parser("list", aliases=["models"], help="list registered models")
+    subparsers.add_parser("status", help="show scheduler and backend status")
+
+    use = subparsers.add_parser(
+        "use", aliases=["start", "switch"], help="activate or prewarm a model"
+    )
+    use.add_argument("model_id")
+
+    release = subparsers.add_parser(
+        "release", aliases=["stop"], help="release a model or the active model"
+    )
+    release.add_argument("model_id", nargs="?")
+
+    logs = subparsers.add_parser("logs", help="show backend or Dispatcher logs")
+    logs.add_argument("model_id", nargs="?", default="dispatcher")
+    logs.add_argument("-f", "--follow", action="store_true")
+    logs.add_argument("--tail", type=int, default=100)
+    subparsers.add_parser("health", help="check Dispatcher health")
+    subparsers.add_parser("config", help="show resolved local CLI configuration")
+    return parser
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+    base_url, token, env_file = configuration(args)
+    client = Client(base_url, token, args.timeout)
+    try:
+        if args.command in {"list", "models"}:
+            command_list(client)
+        elif args.command == "status":
+            command_status(client)
+        elif args.command in {"use", "start", "switch"}:
+            command_use(client, args.model_id)
+        elif args.command in {"release", "stop"}:
+            command_release(client, args.model_id)
+        elif args.command == "logs":
+            command_logs(client, args.model_id, args.follow, args.tail)
+        elif args.command == "health":
+            result = client.request("GET", "/health")
+            print(f"Dispatcher: {result.get('status', 'unknown')}")
+        elif args.command == "config":
+            print(f"URL:      {base_url}")
+            print(f"Env file: {env_file}")
+            print(f"Token:    {'configured' if token else 'missing'}")
+        return 0
+    except CliError as exc:
+        print(f"modelctl: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
