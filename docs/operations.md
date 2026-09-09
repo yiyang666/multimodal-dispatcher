@@ -124,8 +124,13 @@ CUDA/驱动版本不匹配。
 
 ### vLLM Sleep Mode 启动失败
 
-将对应模型的 `sleep_supported` 改为 `false`。Dispatcher 会停止容器来完整释放显存，代价是
-下一次请求需要冷启动。WSL 环境尤其应先实测再打开 Sleep Mode。
+1. **WSL / CuMem `CUDA_ERROR_UNKNOWN`**：切换到 `sleep_patch` 分支，挂载
+   `deploy/vllm-patches/cumem_allocator.abi3.so`（见 `docs/branches.md`），再开
+   `sleep_supported: true`。
+2. **其它平台仍失败**：将对应模型的 `sleep_supported` 改为 `false`。Dispatcher 会停止容器
+   来完整释放显存，代价是下一次请求需要冷启动。
+
+切勿在未挂补丁的 WSL 上强开 Sleep Mode。
 
 ### 手动释放返回 409
 

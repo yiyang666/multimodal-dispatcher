@@ -12,6 +12,8 @@ services:
       - backplane
     environment:
       HF_HUB_DISABLE_XET: "1"
+      # sleep/wake 开发态 API（/sleep /wake_up）需要该开关
+      VLLM_SERVER_DEV_MODE: "1"
     volumes:
       - "${HOME}/.cache/huggingface:/root/.cache/huggingface"
       - "${HOME}/.cache/vllm:/root/.cache/vllm"
@@ -25,14 +27,24 @@ services:
       - --port
       - "8000"
       - --max-model-len
-      - "32768"
+      # RTX 6000 Ada 48GB + 0.85 实测画像预估约 155K KV tokens；128K 保留安全余量。
+      - "131072"
+      # 少量 Agent 并发优先保留长上下文；所有请求仍共享同一个 KV cache 池。
       - --max-num-seqs
-      - "128"
+      - "4"
       - --gpu-memory-utilization
-      - "0.80"
+      - "0.85"
       - --trust-remote-code
       - --reasoning-parser
       - qwen3
+      # OpenClaw / 飞书会发 tool_choice=auto，必须显式开启工具调用
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - qwen3_xml
+      # 复用固定前缀，降低多轮 prefill
+      - --enable-prefix-caching
+      # 空闲释放显存用 sleep，避免 docker stop 后数分钟冷启动
+      - --enable-sleep-mode
 
 networks:
   backplane:

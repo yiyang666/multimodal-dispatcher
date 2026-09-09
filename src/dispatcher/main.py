@@ -139,8 +139,24 @@ class Scheduler:
                 await self.sleep_or_stop(model)
                 self.active = None
 
+    async def is_sleeping(self, model: Model) -> bool:
+        # vLLM sleep 后 /v1/models 仍可能 200，必须查 /is_sleeping
+        if not (model.kind == "vllm" and model.sleep_supported):
+            return False
+        try:
+            response = await self.http.get(
+                model.base_url + "/is_sleeping", timeout=5
+            )
+            if response.is_success:
+                return bool(response.json().get("is_sleeping"))
+        except (httpx.HTTPError, ValueError, TypeError):
+            return False
+        return False
+
     async def ready(self, model: Model) -> bool:
         try:
+            if await self.is_sleeping(model):
+                return False
             response = await self.http.get(
                 model.base_url + model.readiness_path, timeout=5
             )
@@ -160,7 +176,7 @@ class Scheduler:
         if model.kind == "vllm" and model.sleep_supported:
             try:
                 response = await self.http.post(
-                    model.base_url + "/sleep?level=1", timeout=30
+                    model.base_url + "/sleep?level=1", timeout=120
                 )
                 if response.is_success:
                     return
@@ -185,8 +201,10 @@ class Scheduler:
         if not info["State"]["Running"]:
             await self.docker.start(model.container)
         elif model.kind == "vllm" and model.sleep_supported:
+            # 容器 Running 但可能已 sleep；仅在 is_sleeping 时唤醒
             try:
-                await self.http.post(model.base_url + "/wake_up", timeout=60)
+                if await self.is_sleeping(model):
+                    await self.http.post(model.base_url + "/wake_up", timeout=120)
             except httpx.HTTPError:
                 pass
         await self.wait_ready(model)

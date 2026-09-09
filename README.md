@@ -145,3 +145,10 @@ Dispatcher 需要挂载 Docker socket 来启停后端容器，这等同于拥有
 ## License
 
 [MIT](LICENSE) © 2026 yiyang666
+
+## 分支与 Sleep Mode
+
+- `main`：Sleep Mode 正常可用时的默认部署。
+- `sleep_patch`：WSL 等环境下 CuMem Sleep 失败时的补丁分支。
+
+详见 [docs/branches.md](docs/branches.md)。
