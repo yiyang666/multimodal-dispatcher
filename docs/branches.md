@@ -1,3 +1,5 @@
+> 当前检出分支若为 `sleep_patch`，请使用带补丁挂载的 `deploy/vllm-compose.yaml`。
+
 # 分支策略：main 与 sleep_patch
 
 ## main（默认）

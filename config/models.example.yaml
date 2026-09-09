@@ -5,8 +5,7 @@ models:
     container: agent-6000ada
     base_url: http://agent-6000ada:8000
     readiness_path: /v1/models
-    # main：平台已验证 CuMem Sleep Mode 可用时设为 true。
-    # WSL 上 cuMemSetAccess 失败时请改用 sleep_patch 分支（含补丁挂载），勿在无补丁时强开。
+    # sleep_patch：已挂载 deploy/vllm-patches/cumem_allocator.abi3.so，可开 Sleep Mode。
     sleep_supported: true
     capabilities: [text, vision]
 

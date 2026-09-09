@@ -18,6 +18,9 @@ services:
       - "${HOME}/.cache/huggingface:/root/.cache/huggingface"
       - "${HOME}/.cache/vllm:/root/.cache/vllm"
       - "${HOME}/models:/models"
+      # WSL: 强制关闭 CuMem RDMA flag，否则 cuMemSetAccess 返回 CUDA_ERROR_UNKNOWN
+      # 路径相对本仓库；若 compose 拷到 ~/llm-stack/ 运行，请同步复制 deploy/vllm-patches/
+      - "./deploy/vllm-patches/cumem_allocator.abi3.so:/usr/local/lib/python3.12/dist-packages/vllm/cumem_allocator.abi3.so:ro"
     command:
       - Qwen/Qwen3.8-27B-FP8
       - --served-model-name
