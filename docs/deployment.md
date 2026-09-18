@@ -121,7 +121,8 @@ models:
 
 - `base_url` 使用 Docker 网络内的容器名和容器端口，不是宿主机映射端口。
 - vLLM 的 `sleep_supported` 只有在实际验证 Sleep Mode 可用后才能打开（见 `docs/branches.md`）。
-- 默认 `main` 假定 Sleep 可用；WSL CuMem 失败时用 `sleep_patch` 分支，不要只改 YAML。
+- Sleep 是配置项，不是分支：WSL CuMem 失败时在同一 `develop` 上挂载
+  `deploy/vllm-patches/`，不要只改 YAML。
 - ComfyUI 的释放策略固定优先调用 `/free`。
 - `enabled: false` 的条目会出现在管理员状态中，但不会出现在 `/v1/models`。
 

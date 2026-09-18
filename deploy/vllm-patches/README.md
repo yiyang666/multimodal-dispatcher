@@ -19,4 +19,5 @@ g++ -O2 -shared -fPIC -std=c++17 \
 '
 ```
 
-上游驱动或 vLLM 修好后，切回 `main` 并删除本挂载即可。
+上游驱动或 vLLM 修好后，去掉 compose 里的本挂载即可（仍留在 `develop`，按需启用）。
+`sleep_patch` 分支已废弃，勿再切换分支来用本补丁。

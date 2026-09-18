@@ -28,6 +28,9 @@ class Model:
     base_url: str
     readiness_path: str
     sleep_supported: bool = False
+    # Comfy 工作流：按模型绑定不同 API template（缺省走全局 env / Qwen）
+    t2i_workflow: str | None = None
+    i2i_workflow: str | None = None
     capabilities: tuple[str, ...] = ()
 
 
@@ -43,6 +46,8 @@ def load_models(path: str) -> dict[str, Model]:
             base_url=value["base_url"].rstrip("/"),
             readiness_path=value.get("readiness_path", "/health"),
             sleep_supported=bool(value.get("sleep_supported", False)),
+            t2i_workflow=value.get("t2i_workflow"),
+            i2i_workflow=value.get("i2i_workflow"),
             capabilities=tuple(value.get("capabilities", [])),
         )
     return models
@@ -406,9 +411,11 @@ async def chat_completions(request: Request) -> Response:
     return await proxy(request, model, "/v1/chat/completions")
 
 
-def _load_comfy_workflow(env_key: str, default_path: str) -> dict[str, Any]:
-    # ComfyUI API 工作流模板；部署时挂载到 /app/workflows
-    path = Path(os.environ.get(env_key, default_path))
+def _load_comfy_workflow(
+    env_key: str, default_path: str, override_path: str | None = None
+) -> dict[str, Any]:
+    # ComfyUI API 工作流模板；优先模型级路径，其次 env，最后默认
+    path = Path(override_path or os.environ.get(env_key, default_path))
     if not path.is_file():
         raise HTTPException(503, f"ComfyUI workflow template missing: {path}")
     return json.loads(path.read_text())
@@ -532,10 +539,12 @@ async def _comfy_generate(model: Model, payload: dict[str, Any]) -> dict[str, An
 
     workflow = copy.deepcopy(
         _load_comfy_workflow(
-            "COMFY_T2I_WORKFLOW", "/app/workflows/qwen_image_t2i_api.json"
+            "COMFY_T2I_WORKFLOW",
+            "/app/workflows/qwen_image_t2i_api.json",
+            model.t2i_workflow,
         )
     )
-    # 约定节点：6=正提示词，7=负提示词，3=KSampler，58=EmptySD3LatentImage
+    # 约定节点：6=正提示词，7=负提示词，3=KSampler，58=EmptyLatent/EmptySD3Latent
     workflow["6"]["inputs"]["text"] = prompt
     workflow["7"]["inputs"]["text"] = negative
     workflow["3"]["inputs"]["seed"] = seed
@@ -587,7 +596,9 @@ async def _comfy_edit(model: Model, payload: dict[str, Any]) -> dict[str, Any]:
 
     workflow = copy.deepcopy(
         _load_comfy_workflow(
-            "COMFY_I2I_WORKFLOW", "/app/workflows/qwen_image_i2i_api.json"
+            "COMFY_I2I_WORKFLOW",
+            "/app/workflows/qwen_image_i2i_api.json",
+            model.i2i_workflow,
         )
     )
     # 约定节点：10=LoadImage，11=ImageScale，6/7=提示词，3=KSampler

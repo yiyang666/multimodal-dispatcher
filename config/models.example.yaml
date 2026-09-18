@@ -5,7 +5,7 @@ models:
     container: agent-6000ada
     base_url: http://agent-6000ada:8000
     readiness_path: /v1/models
-    # sleep_patch：已挂载 deploy/vllm-patches/cumem_allocator.abi3.so，可开 Sleep Mode。
+    # Sleep 仅对 kind=vllm 有意义；WSL 需时挂载 deploy/vllm-patches/（见 docs/branches.md）
     sleep_supported: true
     capabilities: [text, vision]
 
@@ -24,6 +24,27 @@ models:
     container: comfy-image-6000ada
     base_url: http://comfy-image-6000ada:8188
     readiness_path: /system_stats
+    t2i_workflow: /app/workflows/qwen_image_t2i_api.json
+    i2i_workflow: /app/workflows/qwen_image_i2i_api.json
+    capabilities: [image_generation]
+
+  # 5090 侧示例：SDXL NSFW 路由（与 Comfy 共用容器，靠 t2i_workflow 区分）
+  5090-sdxl-nsfw-jug:
+    kind: comfyui
+    enabled: false
+    container: comfy-5090-qwen-image
+    base_url: http://comfy-5090-qwen-image:8188
+    readiness_path: /system_stats
+    t2i_workflow: /app/workflows/sdxl_jug_t2i_api.json
+    capabilities: [image_generation]
+
+  5090-sdxl-nsfw-ill:
+    kind: comfyui
+    enabled: false
+    container: comfy-5090-qwen-image
+    base_url: http://comfy-5090-qwen-image:8188
+    readiness_path: /system_stats
+    t2i_workflow: /app/workflows/sdxl_ill_t2i_api.json
     capabilities: [image_generation]
 
   video-6000ada:

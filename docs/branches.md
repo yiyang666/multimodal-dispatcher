@@ -1,36 +1,43 @@
-> 当前检出分支若为 `sleep_patch`，请使用带补丁挂载的 `deploy/vllm-compose.yaml`。
+# 开发与部署
 
-# 分支策略：main 与 sleep_patch
+## 分支
 
-## main（默认）
+只维护一条开发线：**`develop`**。
 
-适用于 **vLLM Sleep Mode 可正常工作** 的环境（原生 Linux + 正常 CUDA VMM）：
+| 分支 | 用途 |
+|------|------|
+| `develop` | 日常开发：新 kind / model 字段、workflow、文档、可选补丁资产 |
+| `main` | 稳定发布镜像（按需从 develop 合并）；不要在 main 上堆实验 |
+| `sleep_patch` | **已废弃**。原 WSL CuMem 补丁内容已并入 `develop` 的 `deploy/vllm-patches/` |
 
-- `deploy/vllm-compose.yaml` 启用 `--enable-sleep-mode` 与 `VLLM_SERVER_DEV_MODE`
-- Dispatcher 通过 `/is_sleeping` 判断就绪，空闲走 `/sleep`，请求走 `/wake_up`
-- **不包含** WSL CuMem 二进制补丁
-
-部署前请实测：`POST /sleep` → 显存下降 → `POST /wake_up` → 对话正常。
-
-## sleep_patch
-
-适用于 Sleep Mode **会报错** 的环境，典型为 **WSL2**：驱动谎报
-`GPU_DIRECT_RDMA_WITH_CUDA_VMM_SUPPORTED`，随后 `cuMemSetAccess` 返回 `CUDA_ERROR_UNKNOWN`。
-
-本分支在 main 基础上增加：
-
-- `deploy/vllm-patches/cumem_allocator.*`（强制跳过 RDMA capable flag）
-- compose 只读挂载覆盖镜像内 `cumem_allocator.abi3.so`
+生产机（如 5090）是 **消费者**：不在服务器上长期改仓库。本机改 `develop` → 拷贝/部署到生产（workflow、`models.yaml`、镜像重建等）。
 
 ```bash
 git fetch origin
-git checkout sleep_patch
-# 按 docs/deployment.md 部署；确保 patch 挂载路径有效
+git checkout develop
+git pull --ff-only origin develop   # 若已推送
 ```
 
-上游驱动或 vLLM 修好后，切回 `main` 并去掉补丁挂载即可。
+## Sleep Mode 不是分支，是 vLLM 配置
+
+Sleep 只对 **`kind: vllm`** 有意义。ComfyUI / Ollama 用各自的 `release` 策略，不要为它们开 `sleep_supported`。
+
+| 场景 | 做法 |
+|------|------|
+| 原生 Linux，Sleep 实测可用 | compose 开 `--enable-sleep-mode`；`sleep_supported: true` |
+| WSL2 CuMem 报错 | 仍用 **同一 develop**；挂载 `deploy/vllm-patches/cumem_allocator.abi3.so`（见该目录 README），再开 `sleep_supported: true` |
+| Sleep 不可用或不想用 | `sleep_supported: false`（空闲时 docker stop） |
+
+验证：`POST /sleep` → 显存下降 → `POST /wake_up` → 对话正常。未验证前不要开 `sleep_supported: true`。
+
+## 新增模型 / workflow（本机 → 生产）
+
+1. 本机 `develop`：改代码 / 加 `deploy/*.json` / 更新 `config/models.example.yaml`
+2. 生产：同步文件或重建 dispatcher 镜像；在真实 `config/models.yaml` 登记 model id
+3. Comfy 权重放到生产机挂载目录（如 `checkpoints/sdxl/`），与 workflow 中路径一致
 
 ## 不要做的事
 
-- 不要把 `sleep_patch` 的 `.so` 合进 `main`（污染干净部署路径）
-- 不要在未验证平台上只改 `sleep_supported: true` 却不启用 sleep_patch
+- 不要再检出或推送 `sleep_patch` 做功能开发
+- 不要只靠改 YAML 开 Sleep，却不确认平台与补丁是否匹配
+- 不要把生产机当第二开发仓库长期分叉

@@ -20,6 +20,9 @@ services:
       - ./deploy/qwen_image_t2i_api.json:/app/workflows/qwen_image_t2i_api.json:ro
       # Qwen-Image 图生图 API 工作流
       - ./deploy/qwen_image_i2i_api.json:/app/workflows/qwen_image_i2i_api.json:ro
+      # SDXL NSFW：Juggernaut / Illustrious
+      - ./deploy/sdxl_jug_t2i_api.json:/app/workflows/sdxl_jug_t2i_api.json:ro
+      - ./deploy/sdxl_ill_t2i_api.json:/app/workflows/sdxl_ill_t2i_api.json:ro
     networks:
       - backplane
 
