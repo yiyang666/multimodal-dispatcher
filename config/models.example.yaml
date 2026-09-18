@@ -39,6 +39,7 @@ models:
     base_url: http://comfy-5090-qwen-image:8188
     readiness_path: /system_stats
     t2i_workflow: /app/workflows/sdxl_jug_t2i_api.json
+    i2i_workflow: /app/workflows/sdxl_jug_i2i_api.json
     idle_timeout_seconds: 300
     capabilities: [image_generation]
 
