@@ -31,6 +31,8 @@ class Model:
     # Comfy 工作流：按模型绑定不同 API template（缺省走全局 env / Qwen）
     t2i_workflow: str | None = None
     i2i_workflow: str | None = None
+    # 空闲释放阈值（秒）：None=用全局 IDLE_TIMEOUT_SECONDS；0=永不自动空闲释放
+    idle_timeout_seconds: float | None = None
     capabilities: tuple[str, ...] = ()
 
 
@@ -38,6 +40,7 @@ def load_models(path: str) -> dict[str, Model]:
     raw = yaml.safe_load(Path(path).read_text()) or {}
     models: dict[str, Model] = {}
     for model_id, value in raw.get("models", {}).items():
+        idle_raw = value.get("idle_timeout_seconds")
         models[model_id] = Model(
             id=model_id,
             kind=value["kind"],
@@ -48,6 +51,9 @@ def load_models(path: str) -> dict[str, Model]:
             sleep_supported=bool(value.get("sleep_supported", False)),
             t2i_workflow=value.get("t2i_workflow"),
             i2i_workflow=value.get("i2i_workflow"),
+            idle_timeout_seconds=(
+                None if idle_raw is None else max(0.0, float(idle_raw))
+            ),
             capabilities=tuple(value.get("capabilities", [])),
         )
     return models
@@ -126,20 +132,30 @@ class Scheduler:
                 await self.reaper_task
         await self.http.aclose()
 
+    def effective_idle_timeout(self, model: Model) -> float:
+        # 按模型覆盖全局空闲阈值；None 用全局，0 表示该模型不自动空闲释放
+        if model.idle_timeout_seconds is None:
+            return self.idle_timeout
+        return max(0.0, float(model.idle_timeout_seconds))
+
     async def idle_reaper(self) -> None:
         while True:
             await asyncio.sleep(self.idle_check_interval)
-            if not self.idle_timeout:
-                continue
             async with self.lock:
                 if self.active is None or self.inflight:
                     continue
-                idle_for = time.monotonic() - self.last_activity
-                if idle_for < self.idle_timeout:
-                    continue
                 model = self.models[self.active]
+                timeout = self.effective_idle_timeout(model)
+                if not timeout:
+                    continue
+                idle_for = time.monotonic() - self.last_activity
+                if idle_for < timeout:
+                    continue
                 logger.info(
-                    "Releasing idle model %s after %.1f seconds", model.id, idle_for
+                    "Releasing idle model %s after %.1f seconds (timeout=%.1f)",
+                    model.id,
+                    idle_for,
+                    timeout,
                 )
                 await self.sleep_or_stop(model)
                 self.active = None
@@ -294,13 +310,20 @@ class Scheduler:
                     "running": bool(info and info["State"]["Running"]),
                     "ready": await self.ready(model) if model.enabled else False,
                     "active": model.id == self.active,
+                    "idle_timeout_seconds": self.effective_idle_timeout(model),
                 }
             )
+        effective = (
+            self.effective_idle_timeout(self.models[self.active])
+            if self.active and self.active in self.models
+            else self.idle_timeout
+        )
         return {
             "active": self.active,
             "inflight": self.inflight,
             "idle_seconds": round(time.monotonic() - self.last_activity, 1),
-            "idle_timeout_seconds": self.idle_timeout,
+            "idle_timeout_seconds": effective,
+            "global_idle_timeout_seconds": self.idle_timeout,
             "models": rows,
         }
 

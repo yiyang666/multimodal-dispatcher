@@ -53,6 +53,10 @@ SWITCH_WAIT_TIMEOUT_SECONDS=900
 - vLLM 根据 `sleep_supported` 选择休眠或停止容器。
 - ComfyUI 调用 `/free`；容器继续显示 `Up` 是正常现象。
 - 跨模型请求会等待当前任务完成，超过切换等待阈值则返回 503。
+- 可在 `config/models.yaml` 为单个模型设置 `idle_timeout_seconds`：
+  - 省略：使用全局 `IDLE_TIMEOUT_SECONDS`
+  - `0`：该模型空闲时不自动释放（切到其它模型或 `modelctl release` 仍会释放）
+  - 正数：覆盖全局阈值（例如图像模型 `300`）
 
 修改后重建 Dispatcher 容器使环境变量生效：
 
@@ -61,7 +65,7 @@ docker compose up -d
 modelctl status
 ```
 
-将 `IDLE_TIMEOUT_SECONDS` 设为 `0` 可以关闭自动释放。
+将全局 `IDLE_TIMEOUT_SECONDS` 设为 `0` 可以关闭所有未单独配置模型的自动释放。
 
 ## 更新
 

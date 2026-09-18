@@ -111,7 +111,9 @@ Sleep Mode 是否可用取决于 vLLM、CUDA、驱动、WSL 和模型组合，�
 降低后续启动成本。
 
 Idle Reaper 定期检查：只有 `active` 非空、`inflight` 为零且空闲时间达到阈值时才释放。
-`IDLE_TIMEOUT_SECONDS=0` 可关闭自动回收。
+全局 `IDLE_TIMEOUT_SECONDS=0` 可关闭未单独配置模型的自动回收；模型级
+`idle_timeout_seconds`（`0`=永不空闲释放，正数=覆盖全局）优先于全局阈值。
+跨模型切换与手动 `release` 不受该字段影响，仍会释放旧后端。
 
 ## 协议适配
 

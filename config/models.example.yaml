@@ -7,6 +7,8 @@ models:
     readiness_path: /v1/models
     # Sleep 仅对 kind=vllm 有意义；WSL 需时挂载 deploy/vllm-patches/（见 docs/branches.md）
     sleep_supported: true
+    # 缺省用全局 IDLE_TIMEOUT_SECONDS；设 0 可禁用该模型的空闲自动释放
+    # idle_timeout_seconds: 0
     capabilities: [text, vision]
 
   coder-6000ada:
@@ -26,6 +28,7 @@ models:
     readiness_path: /system_stats
     t2i_workflow: /app/workflows/qwen_image_t2i_api.json
     i2i_workflow: /app/workflows/qwen_image_i2i_api.json
+    idle_timeout_seconds: 300
     capabilities: [image_generation]
 
   # 5090 侧示例：SDXL NSFW 路由（与 Comfy 共用容器，靠 t2i_workflow 区分）
@@ -36,6 +39,7 @@ models:
     base_url: http://comfy-5090-qwen-image:8188
     readiness_path: /system_stats
     t2i_workflow: /app/workflows/sdxl_jug_t2i_api.json
+    idle_timeout_seconds: 300
     capabilities: [image_generation]
 
   5090-sdxl-nsfw-ill:
@@ -45,6 +49,7 @@ models:
     base_url: http://comfy-5090-qwen-image:8188
     readiness_path: /system_stats
     t2i_workflow: /app/workflows/sdxl_ill_t2i_api.json
+    idle_timeout_seconds: 300
     capabilities: [image_generation]
 
   video-6000ada:
@@ -53,4 +58,5 @@ models:
     container: comfy-video-6000ada
     base_url: http://comfy-video-6000ada:8188
     readiness_path: /system_stats
+    idle_timeout_seconds: 300
     capabilities: [video_generation]
