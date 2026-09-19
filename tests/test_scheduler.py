@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 from fastapi import HTTPException
 
-from dispatcher.main import Model, Scheduler, load_models
+from dispatcher.main import Model, Scheduler, _replace_workflow_values, load_models
 
 
 class FakeDocker:
@@ -115,6 +115,21 @@ class ModelConfigTests(unittest.TestCase):
         self.assertEqual(model.kind, "ollama")
         self.assertEqual(model.release, "ollama_unload")
         self.assertEqual(model.upstream_model, "example-model:latest")
+
+    def test_video_workflow_placeholders_preserve_types(self) -> None:
+        workflow = {
+            "prompt": "{{prompt}}",
+            "width": "{{width}}",
+            "nested": ["unchanged", "{{frames}}"],
+        }
+        replaced = _replace_workflow_values(
+            workflow,
+            {"{{prompt}}": "a test clip", "{{width}}": 832, "{{frames}}": 81},
+        )
+        self.assertEqual(replaced["prompt"], "a test clip")
+        self.assertEqual(replaced["width"], 832)
+        self.assertEqual(replaced["nested"], ["unchanged", 81])
+        self.assertEqual(workflow["width"], "{{width}}")
 
 
 if __name__ == "__main__":

@@ -134,6 +134,11 @@ Ollama 使用其 OpenAI 兼容的 `/v1/chat/completions` 接口。注册表中�
 Dispatcher 将 OpenAI 风格的图片参数填入固定 ComfyUI API 工作流，提交 `/prompt`，轮询
 `/history/{prompt_id}`，再通过 `/view` 获取结果并返回 base64。工作流模板和节点映射必须匹配。
 
+视频生成使用异步任务接口：提交时返回任务 ID，Dispatcher 在后台轮询 ComfyUI，客户端再查询
+状态并下载结果。视频工作流通过 `{{prompt}}`、`{{width}}`、`{{frames}}` 等精确占位值注入参数，
+因此无需在 Python 代码中硬编码不同 Wan 工作流的节点编号。任务状态当前保存在进程内，重启后
+不会恢复；持久队列属于后续扩展。
+
 ## 故障与一致性
 
 - 后端不存在：返回 503，提示先创建容器。

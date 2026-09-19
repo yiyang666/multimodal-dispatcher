@@ -1,0 +1,15 @@
+{
+  "77": {"class_type": "UNETLoader", "inputs": {"unet_name": "Wan2.2_Remix_NSFW_t2v_14b_high_lighting_v1.0_dyno.safetensors", "weight_dtype": "fp8_e4m3fn"}},
+  "54": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["77", 0], "shift": 5.0}},
+  "103": {"class_type": "UNETLoader", "inputs": {"unet_name": "Wan2.2_Remix_NSFW_t2v_14b_low_lighting_v1.0.safetensors", "weight_dtype": "fp8_e4m3fn"}},
+  "55": {"class_type": "ModelSamplingSD3", "inputs": {"model": ["103", 0], "shift": 5.0}},
+  "97": {"class_type": "CLIPLoader", "inputs": {"clip_name": "nsfw_wan_umt5-xxl_fp8_scaled.safetensors", "type": "wan", "device": "default"}},
+  "6": {"class_type": "CLIPTextEncode", "inputs": {"text": "{{prompt}}", "clip": ["97", 0]}},
+  "7": {"class_type": "CLIPTextEncode", "inputs": {"text": "{{negative_prompt}}", "clip": ["97", 0]}},
+  "39": {"class_type": "VAELoader", "inputs": {"vae_name": "wan_2.1_vae.safetensors"}},
+  "59": {"class_type": "EmptyHunyuanLatentVideo", "inputs": {"width": "{{width}}", "height": "{{height}}", "length": "{{frames}}", "batch_size": 1}},
+  "57": {"class_type": "KSamplerAdvanced", "inputs": {"model": ["54", 0], "add_noise": "enable", "noise_seed": "{{seed}}", "steps": "{{steps}}", "cfg": "{{cfg_scale}}", "sampler_name": "euler", "scheduler": "simple", "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["59", 0], "start_at_step": 0, "end_at_step": "{{switch_step}}", "return_with_leftover_noise": "enable"}},
+  "58": {"class_type": "KSamplerAdvanced", "inputs": {"model": ["55", 0], "add_noise": "disable", "noise_seed": "{{seed}}", "steps": "{{steps}}", "cfg": "{{cfg_scale}}", "sampler_name": "euler", "scheduler": "simple", "positive": ["6", 0], "negative": ["7", 0], "latent_image": ["57", 0], "start_at_step": "{{switch_step}}", "end_at_step": 10000, "return_with_leftover_noise": "disable"}},
+  "8": {"class_type": "VAEDecode", "inputs": {"samples": ["58", 0], "vae": ["39", 0]}},
+  "47": {"class_type": "SaveWEBM", "inputs": {"images": ["8", 0], "filename_prefix": "wan22_remix_nsfw", "codec": "vp9", "fps": "{{fps}}", "crf": 24}}
+}

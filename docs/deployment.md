@@ -134,6 +134,9 @@ models:
 - Sleep 是配置项，不是分支：WSL CuMem 失败时在同一 `develop` 上挂载
   `deploy/vllm-patches/`，不要只改 YAML。
 - ComfyUI 的释放策略固定优先调用 `/free`。
+- 视频模型通过 `video_workflow` 指定 API 工作流；模板可以使用 `{{prompt}}`、
+  `{{negative_prompt}}`、`{{width}}`、`{{height}}`、`{{frames}}`、`{{fps}}`、`{{steps}}`、
+  `{{cfg_scale}}`、`{{seed}}` 和双模型工作流使用的 `{{switch_step}}` 作为精确占位值。
 - `enabled: false` 的条目会出现在管理员状态中，但不会出现在 `/v1/models`。
 
 ## 6. 配置 Dispatcher

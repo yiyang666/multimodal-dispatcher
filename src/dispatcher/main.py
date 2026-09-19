@@ -7,7 +7,7 @@ import os
 import time
 import uuid
 from contextlib import asynccontextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +35,7 @@ class Model:
     # Comfy 工作流：按模型绑定不同 API template（缺省走全局 env / Qwen）
     t2i_workflow: str | None = None
     i2i_workflow: str | None = None
+    video_workflow: str | None = None
     # 空闲释放阈值（秒）：None=用全局 IDLE_TIMEOUT_SECONDS；0=永不自动空闲释放
     idle_timeout_seconds: float | None = None
     capabilities: tuple[str, ...] = ()
@@ -67,6 +68,7 @@ def load_models(path: str) -> dict[str, Model]:
             release=str(value.get("release") or default_release),
             t2i_workflow=value.get("t2i_workflow"),
             i2i_workflow=value.get("i2i_workflow"),
+            video_workflow=value.get("video_workflow"),
             idle_timeout_seconds=(
                 None if idle_raw is None else max(0.0, float(idle_raw))
             ),
@@ -387,6 +389,19 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="6000 Ada Multimodal Dispatcher", lifespan=lifespan)
 
 
+@dataclass
+class VideoJob:
+    id: str
+    model: str
+    status: str = "queued"
+    created: int = field(default_factory=lambda: int(time.time()))
+    error: str | None = None
+    output: dict[str, str] | None = None
+
+
+video_jobs: dict[str, VideoJob] = {}
+
+
 def require_admin(token: str | None) -> None:
     expected = os.environ.get("DISPATCHER_ADMIN_TOKEN")
     if not expected or token != expected:
@@ -576,6 +591,139 @@ async def _comfy_queue(
     if not prompt_id:
         raise HTTPException(502, "ComfyUI did not return prompt_id")
     return prompt_id
+
+
+def _replace_workflow_values(value: Any, replacements: dict[str, Any]) -> Any:
+    """Replace exact {{name}} values without coupling the API to Comfy node IDs."""
+    if isinstance(value, dict):
+        return {key: _replace_workflow_values(item, replacements) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_replace_workflow_values(item, replacements) for item in value]
+    if isinstance(value, str) and value in replacements:
+        return replacements[value]
+    return value
+
+
+async def _comfy_wait_video(
+    client: httpx.AsyncClient, base_url: str, prompt_id: str
+) -> dict[str, str]:
+    deadline = asyncio.get_running_loop().time() + float(
+        os.environ.get("COMFY_VIDEO_TIMEOUT", "3600")
+    )
+    while asyncio.get_running_loop().time() < deadline:
+        history = await client.get(base_url + f"/history/{prompt_id}")
+        history.raise_for_status()
+        item = history.json().get(prompt_id)
+        if item:
+            status = item.get("status", {})
+            if status.get("status_str") == "error":
+                raise RuntimeError("ComfyUI video workflow failed")
+            for node_out in item.get("outputs", {}).values():
+                for key in ("videos", "gifs", "images"):
+                    files = node_out.get(key, [])
+                    if files:
+                        output = files[0]
+                        return {
+                            "filename": output["filename"],
+                            "subfolder": output.get("subfolder", ""),
+                            "type": output.get("type", "output"),
+                        }
+        await asyncio.sleep(2)
+    raise TimeoutError("ComfyUI video generation timed out")
+
+
+async def _run_video_job(
+    request: Request,
+    model: Model,
+    job: VideoJob,
+    workflow: dict[str, Any],
+) -> None:
+    job.status = "running"
+    try:
+        prompt_id = await _comfy_queue(request.app.state.proxy, model.base_url, workflow)
+        job.output = await _comfy_wait_video(
+            request.app.state.proxy, model.base_url, prompt_id
+        )
+        job.status = "completed"
+    except Exception as exc:
+        logger.exception("Video job %s failed", job.id)
+        job.status = "failed"
+        job.error = str(exc)
+    finally:
+        request.app.state.scheduler.finish_request()
+
+
+@app.post("/v1/videos/generations", status_code=202)
+async def video_generation(request: Request) -> dict[str, Any]:
+    payload = await request.json()
+    model_id = payload.get("model")
+    prompt = payload.get("prompt")
+    if not isinstance(model_id, str) or not isinstance(prompt, str) or not prompt.strip():
+        raise HTTPException(400, "model and prompt are required")
+
+    scheduler: Scheduler = request.app.state.scheduler
+    model = await scheduler.activate(model_id, reserve=True)
+    if model.kind != "comfyui" or "video_generation" not in model.capabilities:
+        scheduler.finish_request()
+        raise HTTPException(400, f"{model_id} is not a video generation model")
+    if not model.video_workflow:
+        scheduler.finish_request()
+        raise HTTPException(503, f"{model_id} has no video_workflow configured")
+
+    try:
+        workflow = _load_comfy_workflow("COMFY_VIDEO_WORKFLOW", model.video_workflow)
+        width, height = _parse_image_size(payload.get("size") or "832x480")
+        steps = max(1, min(100, int(payload.get("steps", 20))))
+        replacements = {
+            "{{prompt}}": prompt,
+            "{{negative_prompt}}": payload.get("negative_prompt") or "",
+            "{{width}}": width,
+            "{{height}}": height,
+            "{{frames}}": max(1, min(257, int(payload.get("frames", 81)))),
+            "{{fps}}": max(1, min(60, int(payload.get("fps", 16)))),
+            "{{steps}}": steps,
+            "{{switch_step}}": max(1, steps // 2),
+            "{{cfg_scale}}": float(payload.get("cfg_scale", 5.0)),
+            "{{seed}}": int(payload.get("seed", uuid.uuid4().int % (2**31))),
+        }
+        workflow = _replace_workflow_values(workflow, replacements)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        scheduler.finish_request()
+        raise HTTPException(400, f"Invalid video workflow parameters: {exc}") from exc
+
+    job = VideoJob(id=f"video-{uuid.uuid4().hex}", model=model.id)
+    video_jobs[job.id] = job
+    asyncio.create_task(_run_video_job(request, model, job, workflow))
+    return asdict(job)
+
+
+@app.get("/v1/videos/generations/{job_id}")
+async def video_generation_status(job_id: str) -> dict[str, Any]:
+    job = video_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404, "Unknown video job")
+    result = asdict(job)
+    if job.status == "completed":
+        result["content_url"] = f"/v1/videos/generations/{job.id}/content"
+    return result
+
+
+@app.get("/v1/videos/generations/{job_id}/content")
+async def video_generation_content(job_id: str, request: Request) -> Response:
+    job = video_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404, "Unknown video job")
+    if job.status != "completed" or not job.output:
+        raise HTTPException(409, f"Video job is {job.status}")
+    model = request.app.state.scheduler.models[job.model]
+    response = await request.app.state.proxy.get(
+        model.base_url + "/view", params=job.output
+    )
+    response.raise_for_status()
+    return Response(
+        content=response.content,
+        media_type=response.headers.get("content-type", "video/mp4"),
+    )
 
 
 def _decode_image_bytes(payload: dict[str, Any]) -> bytes:

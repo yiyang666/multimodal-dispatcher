@@ -84,6 +84,8 @@ ComfyUI 调用 `/free` 卸载模型但保留服务进程。
 | `POST /v1/chat/completions` | vLLM | 普通与 SSE 流式响应透传 |
 | `POST /v1/images/generations` | ComfyUI | 固定 API 工作流的文生图适配 |
 | `POST /v1/images/edits` | ComfyUI | JSON + base64 图片的图生图适配 |
+| `POST /v1/videos/generations` | ComfyUI | 异步提交固定 API 工作流的视频生成任务 |
+| `GET /v1/videos/generations/{id}` | Dispatcher | 查询视频任务状态与结果地址 |
 | `/admin/*` | Dispatcher | 带令牌的状态、预热与释放接口 |
 
 当前仓库里的 Qwen 与 Qwen-Image 配置只是示例。对外模型 ID、容器名、后端地址及能力均由
@@ -135,6 +137,7 @@ docker compose up -d --build
 - [开发与发布链路](docs/branches.md)：本地开发、脱敏样例、Tag 发布及生产部署边界。
 - [`modelctl` 使用手册](docs/cli.md)：日常查看、切换、释放和排障。
 - [架构设计](docs/architecture.md)：调度状态、并发边界和后端适配方式。
+- [视频生成接口](docs/video.md)：异步提交、状态查询、结果下载和工作流模板。
 - [运维手册](docs/operations.md)：升级、日志、空闲策略和常见故障。
 
 ## 安全边界
