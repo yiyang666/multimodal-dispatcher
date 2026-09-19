@@ -32,7 +32,7 @@ flowchart TB
     end
 
     subgraph Backends["llm-backplane"]
-        Text["vLLM 容器"]
+        Text["vLLM / Ollama 容器"]
         Media["ComfyUI 容器"]
     end
 
@@ -104,6 +104,7 @@ stateDiagram-v2
 | --- | --- | --- | --- |
 | vLLM 且支持 Sleep Mode | `POST /sleep?level=1` | 停止容器 | 是 |
 | vLLM 不支持 Sleep Mode | 停止容器 | — | 否 |
+| Ollama | `keep_alive=0` 卸载模型 | 停止容器 | 是 |
 | ComfyUI | `POST /free` | 停止容器 | 是 |
 
 Sleep Mode 是否可用取决于 vLLM、CUDA、驱动、WSL 和模型组合，必须实机验证。停止 vLLM 容器
@@ -121,6 +122,12 @@ Idle Reaper 定期检查：只有 `active` 非空、`inflight` 为零且空闲�
 
 `/v1/chat/completions` 请求体和有限响应头原样转发。`text/event-stream` 使用流式透传，连接关闭
 才视为请求完成。
+
+### Ollama
+
+Ollama 使用其 OpenAI 兼容的 `/v1/chat/completions` 接口。注册表中的稳定模型 ID 会在转发前改写
+为 `upstream_model` 指定的真实 Ollama tag；激活时用 `keep_alive=-1` 预加载，释放时用
+`keep_alive=0` 卸载权重而保留 Ollama 服务进程。
 
 ### ComfyUI
 

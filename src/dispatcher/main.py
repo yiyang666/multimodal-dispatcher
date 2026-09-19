@@ -28,6 +28,10 @@ class Model:
     base_url: str
     readiness_path: str
     sleep_supported: bool = False
+    # 对外稳定 ID 与后端实际模型名解耦（例如 Ollama tag）。
+    upstream_model: str | None = None
+    # stop | vllm_sleep | comfy_free | ollama_unload；省略时按 kind 推导。
+    release: str = "stop"
     # Comfy 工作流：按模型绑定不同 API template（缺省走全局 env / Qwen）
     t2i_workflow: str | None = None
     i2i_workflow: str | None = None
@@ -41,14 +45,26 @@ def load_models(path: str) -> dict[str, Model]:
     models: dict[str, Model] = {}
     for model_id, value in raw.get("models", {}).items():
         idle_raw = value.get("idle_timeout_seconds")
+        kind = value["kind"]
+        default_release = (
+            "ollama_unload"
+            if kind == "ollama"
+            else "vllm_sleep"
+            if kind == "vllm" and value.get("sleep_supported")
+            else "comfy_free"
+            if kind == "comfyui"
+            else "stop"
+        )
         models[model_id] = Model(
             id=model_id,
-            kind=value["kind"],
+            kind=kind,
             enabled=bool(value.get("enabled", False)),
             container=value["container"],
             base_url=value["base_url"].rstrip("/"),
             readiness_path=value.get("readiness_path", "/health"),
             sleep_supported=bool(value.get("sleep_supported", False)),
+            upstream_model=value.get("upstream_model"),
+            release=str(value.get("release") or default_release),
             t2i_workflow=value.get("t2i_workflow"),
             i2i_workflow=value.get("i2i_workflow"),
             idle_timeout_seconds=(
@@ -194,7 +210,7 @@ class Scheduler:
         raise HTTPException(503, f"{model.id} did not become ready within {seconds}s")
 
     async def sleep_or_stop(self, model: Model) -> None:
-        if model.kind == "vllm" and model.sleep_supported:
+        if model.release == "vllm_sleep":
             try:
                 response = await self.http.post(
                     model.base_url + "/sleep?level=1", timeout=120
@@ -203,7 +219,20 @@ class Scheduler:
                     return
             except httpx.HTTPError:
                 pass
-        if model.kind == "comfyui":
+        if model.release == "ollama_unload":
+            name = model.upstream_model or model.id
+            try:
+                response = await self.http.post(
+                    model.base_url + "/api/generate",
+                    json={"model": name, "keep_alive": 0},
+                    timeout=120,
+                )
+                if response.is_success:
+                    logger.info("Unloaded Ollama model %s", name)
+                    return
+            except httpx.HTTPError as exc:
+                logger.warning("Ollama unload failed for %s: %s", name, exc)
+        if model.release == "comfy_free":
             try:
                 response = await self.http.post(
                     model.base_url + "/free",
@@ -229,6 +258,18 @@ class Scheduler:
             except httpx.HTTPError:
                 pass
         await self.wait_ready(model)
+        if model.release == "ollama_unload":
+            name = model.upstream_model or model.id
+            try:
+                response = await self.http.post(
+                    model.base_url + "/api/generate",
+                    json={"model": name, "keep_alive": -1},
+                    timeout=600,
+                )
+                response.raise_for_status()
+                logger.info("Preloaded Ollama model %s", name)
+            except httpx.HTTPError as exc:
+                logger.warning("Ollama preload failed for %s: %s", name, exc)
 
     async def activate(self, model_id: str, reserve: bool = False) -> Model:
         model = self.models.get(model_id)
@@ -352,7 +393,12 @@ def require_admin(token: str | None) -> None:
         raise HTTPException(401, "Invalid dispatcher admin token")
 
 
-async def proxy(request: Request, model: Model, suffix: str) -> Response:
+async def proxy(
+    request: Request,
+    model: Model,
+    suffix: str,
+    payload: dict[str, Any] | None = None,
+) -> Response:
     released = False
 
     def release_once() -> None:
@@ -362,12 +408,18 @@ async def proxy(request: Request, model: Model, suffix: str) -> Response:
             released = True
 
     try:
-        body = await request.body()
+        body = (
+            json.dumps(payload).encode("utf-8")
+            if payload is not None
+            else await request.body()
+        )
         headers = {
             k: v
             for k, v in request.headers.items()
             if k.lower() not in {"host", "content-length"}
         }
+        if payload is not None:
+            headers["content-type"] = "application/json"
         upstream = request.app.state.proxy.build_request(
             request.method, model.base_url + suffix, content=body, headers=headers
         )
@@ -428,10 +480,12 @@ async def chat_completions(request: Request) -> Response:
         raise HTTPException(400, "model is required")
     scheduler: Scheduler = request.app.state.scheduler
     model = await scheduler.activate(model_id, reserve=True)
-    if model.kind != "vllm":
+    if model.kind not in {"vllm", "ollama"}:
         scheduler.finish_request()
         raise HTTPException(400, f"{model_id} is not a chat model")
-    return await proxy(request, model, "/v1/chat/completions")
+    if model.upstream_model:
+        payload["model"] = model.upstream_model
+    return await proxy(request, model, "/v1/chat/completions", payload=payload)
 
 
 def _load_comfy_workflow(

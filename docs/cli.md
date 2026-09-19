@@ -22,7 +22,7 @@ modelctl config
 远程管理示例：
 
 ```bash
-DISPATCHER_URL=http://10.0.0.8:8000 \
+DISPATCHER_URL=http://dispatcher.example.internal:8000 \
 DISPATCHER_ADMIN_TOKEN='your-token' \
 modelctl status
 ```

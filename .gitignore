@@ -1,5 +1,8 @@
 .env
 config/models.yaml
+# 每台部署机自己的 Compose 覆盖与配置备份，不属于公共源码。
+docker-compose.override.yaml
+config/*.bak*
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -10,4 +13,3 @@ venv/
 dist/
 build/
 .DS_Store
-

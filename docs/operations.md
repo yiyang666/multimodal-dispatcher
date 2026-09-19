@@ -51,6 +51,7 @@ SWITCH_WAIT_TIMEOUT_SECONDS=900
 - 最后一个普通或流式请求结束后开始计算空闲时间。
 - 到达阈值且没有在途请求时自动释放活动后端。
 - vLLM 根据 `sleep_supported` 选择休眠或停止容器。
+- Ollama 使用 `keep_alive=0` 卸载模型权重，同时保留服务容器。
 - ComfyUI 调用 `/free`；容器继续显示 `Up` 是正常现象。
 - 跨模型请求会等待当前任务完成，超过切换等待阈值则返回 503。
 - 可在 `config/models.yaml` 为单个模型设置 `idle_timeout_seconds`：
@@ -69,16 +70,26 @@ modelctl status
 
 ## 更新
 
-更新前先查看本地修改：
+生产服务器只部署开发机发布的固定 Tag。更新前确认已跟踪文件没有本地修改，然后检出目标版本：
 
 ```bash
 git status --short
-git pull --ff-only
+git diff --quiet
+git diff --cached --quiet
+git fetch --tags origin
+git checkout --detach <release-tag>
+docker compose config --quiet
 docker compose up -d --build
+modelctl health
+modelctl status
 ```
 
+`.env`、`config/models.yaml` 和 `docker-compose.override.yaml` 可以作为服务器私有配置保留，但
+不得提交。若 `src/`、Dockerfile、通用 Compose 或工作流有服务器本地修改，停止部署并把通用
+能力移植回开发机；禁止在服务器直接提交或用强制覆盖处理。
+
 只重建 Dispatcher 不会重新下载模型，也不会删除后端容器。更新涉及工作流模板时，应同时确认
-`docker-compose.yaml` 已挂载对应文件。
+Compose 已挂载对应文件。详细发布链路见[开发与发布链路](branches.md)。
 
 ## 新增模型
 

@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 from fastapi import HTTPException
 
-from dispatcher.main import Model, Scheduler
+from dispatcher.main import Model, Scheduler, load_models
 
 
 class FakeDocker:
@@ -78,6 +78,43 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_release_is_idempotent_without_active_model(self) -> None:
         self.assertIsNone(await self.scheduler.deactivate())
+
+    async def test_ollama_release_unloads_without_stopping_container(self) -> None:
+        ollama = Model(
+            "public-id",
+            "ollama",
+            True,
+            "ollama",
+            "http://ollama:11434",
+            "/api/tags",
+            upstream_model="actual:tag",
+            release="ollama_unload",
+        )
+        response = AsyncMock()
+        response.is_success = True
+        self.scheduler.http.post = AsyncMock(return_value=response)
+        self.scheduler.docker.stop = AsyncMock()
+
+        await Scheduler.sleep_or_stop(self.scheduler, ollama)
+
+        self.scheduler.http.post.assert_awaited_once_with(
+            "http://ollama:11434/api/generate",
+            json={"model": "actual:tag", "keep_alive": 0},
+            timeout=120,
+        )
+        self.scheduler.docker.stop.assert_not_awaited()
+
+
+class ModelConfigTests(unittest.TestCase):
+    def test_ollama_defaults_to_unload_release(self) -> None:
+        with self.subTest("load sample config"):
+            models = load_models(
+                str(Path(__file__).parents[1] / "config" / "models.example.yaml")
+            )
+        model = models["local-rp-example"]
+        self.assertEqual(model.kind, "ollama")
+        self.assertEqual(model.release, "ollama_unload")
+        self.assertEqual(model.upstream_model, "example-model:latest")
 
 
 if __name__ == "__main__":

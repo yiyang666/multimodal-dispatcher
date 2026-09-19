@@ -27,6 +27,15 @@ cd multimodal-dispatcher
 
 后续命令默认在项目根目录执行。
 
+生产部署应检出开发机已经验证并发布的固定 Tag，而不是长期跟随 `develop`：
+
+```bash
+git fetch --tags origin
+git checkout --detach <release-tag>
+```
+
+完整的源码、环境配置与发布边界见[开发与发布链路](branches.md)。
+
 ## 3. 创建私有后端网络
 
 ```bash
@@ -108,7 +117,7 @@ cp config/models.example.yaml config/models.yaml
 ```yaml
 models:
   my-agent:
-    kind: vllm                 # vllm 或 comfyui
+    kind: vllm                 # vllm、ollama 或 comfyui
     enabled: true              # false 表示预留但不可调用
     container: my-agent        # 已创建的 Docker 容器名
     base_url: http://my-agent:8000
@@ -121,6 +130,7 @@ models:
 
 - `base_url` 使用 Docker 网络内的容器名和容器端口，不是宿主机映射端口。
 - vLLM 的 `sleep_supported` 只有在实际验证 Sleep Mode 可用后才能打开（见 `docs/branches.md`）。
+- Ollama 可用 `upstream_model` 指向真实模型 tag，并设置 `release: ollama_unload`；对外 ID 可保持稳定。
 - Sleep 是配置项，不是分支：WSL CuMem 失败时在同一 `develop` 上挂载
   `deploy/vllm-patches/`，不要只改 YAML。
 - ComfyUI 的释放策略固定优先调用 `/free`。
@@ -225,14 +235,25 @@ http://<dispatcher-private-ip>:8000/v1
 客户端仍按正常方式设置 `model`。业务请求会自动完成后端切换，不应在 Agent 提示词或业务
 代码中执行 `docker`、`modelctl` 或 Compose 命令。
 
-## 11. 更新与卸载
+## 11. 按发布 Tag 更新与卸载
 
-更新代码并重建 Dispatcher：
+生产服务器禁止直接修改或提交源码。更新前先确认已跟踪文件没有变化；真实 `.env`、
+`config/models.yaml` 和可选 `docker-compose.override.yaml` 应保持为被忽略的环境配置：
 
 ```bash
-git pull --ff-only
+git status --short
+git diff --quiet
+git diff --cached --quiet
+git fetch --tags origin
+git checkout --detach <new-release-tag>
+docker compose config --quiet
 docker compose up -d --build
+./modelctl health
+./modelctl status
 ```
+
+不要在生产环境直接 `git pull` 开发分支。若已跟踪文件有修改，应停止升级并将其中的通用能力
+移植回开发机；不要直接覆盖。回滚时检出上一个已验证 Tag 并重新执行构建和验收。
 
 停止 Dispatcher 不会删除模型文件或后端容器：
 

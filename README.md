@@ -132,6 +132,7 @@ docker compose up -d --build
 ## 配置与文档
 
 - [通用部署指南](docs/deployment.md)：从 Docker/GPU 前置条件到后端容器、网络和验收。
+- [开发与发布链路](docs/branches.md)：本地开发、脱敏样例、Tag 发布及生产部署边界。
 - [`modelctl` 使用手册](docs/cli.md)：日常查看、切换、释放和排障。
 - [架构设计](docs/architecture.md)：调度状态、并发边界和后端适配方式。
 - [运维手册](docs/operations.md)：升级、日志、空闲策略和常见故障。
@@ -146,9 +147,11 @@ Dispatcher 需要挂载 Docker socket 来启停后端容器，这等同于拥有
 
 [MIT](LICENSE) © 2026 yiyang666
 
-## 开发分支与 Sleep Mode
+## 开发、发布与 Sleep Mode
 
-- 日常开发用 **`develop`**；生产机只消费本机同步过去的产物。
+- 日常开发只在开发机的 **`develop`** 上进行；生产机不修改或提交源码。
+- 发布时从已验证源码创建不可变 Tag；生产机检出该 Tag 后构建镜像，不直接跟随开发分支。
+- 真实 IP、令牌、模型路径和实际模型注册表只存在于部署环境，仓库仅提供脱敏样例。
 - Sleep Mode 仅针对 **`kind: vllm`**，用 `sleep_supported`（及可选 WSL CuMem 挂载）表达，不是单独分支。
 - `sleep_patch` 已废弃。
 

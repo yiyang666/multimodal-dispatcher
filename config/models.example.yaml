@@ -20,6 +20,18 @@ models:
     sleep_supported: false
     capabilities: [text]
 
+  # Ollama 示例：对外 ID 不需要等于 Ollama 中的真实 tag。
+  local-rp-example:
+    kind: ollama
+    enabled: false
+    container: ollama
+    base_url: http://ollama:11434
+    readiness_path: /api/tags
+    upstream_model: example-model:latest
+    release: ollama_unload
+    idle_timeout_seconds: 300
+    capabilities: [text]
+
   image-6000ada:
     kind: comfyui
     enabled: true
