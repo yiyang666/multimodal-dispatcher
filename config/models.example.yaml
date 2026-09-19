@@ -72,5 +72,6 @@ models:
     base_url: http://comfy-video-6000ada:8188
     readiness_path: /system_stats
     video_workflow: /app/workflows/wan22_5b_t2v_api.json
+    i2v_video_workflow: /app/workflows/wan22_5b_i2v_api.json
     idle_timeout_seconds: 300
     capabilities: [video_generation]

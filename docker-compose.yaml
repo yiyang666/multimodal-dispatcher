@@ -25,6 +25,7 @@ services:
       - ./deploy/sdxl_jug_i2i_api.json:/app/workflows/sdxl_jug_i2i_api.json:ro
       - ./deploy/sdxl_ill_t2i_api.json:/app/workflows/sdxl_ill_t2i_api.json:ro
       - ./deploy/wan22_5b_t2v_api.json:/app/workflows/wan22_5b_t2v_api.json:ro
+      - ./deploy/wan22_5b_i2v_api.json:/app/workflows/wan22_5b_i2v_api.json:ro
       - ./deploy/wan22_remix_nsfw_t2v_api.json:/app/workflows/wan22_remix_nsfw_t2v_api.json:ro
     networks:
       - backplane

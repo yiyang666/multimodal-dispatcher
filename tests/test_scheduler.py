@@ -131,6 +131,16 @@ class ModelConfigTests(unittest.TestCase):
         self.assertEqual(replaced["nested"], ["unchanged", 81])
         self.assertEqual(workflow["width"], "{{width}}")
 
+    def test_video_model_loads_image_to_video_workflow(self) -> None:
+        models = load_models(
+            str(Path(__file__).parents[1] / "config" / "models.example.yaml")
+        )
+        model = models["video-6000ada"]
+        self.assertEqual(
+            model.i2v_video_workflow,
+            "/app/workflows/wan22_5b_i2v_api.json",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

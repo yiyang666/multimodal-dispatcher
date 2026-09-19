@@ -30,6 +30,27 @@ curl http://127.0.0.1:8000/v1/videos/generations/<job-id>
 状态为 `completed` 后，读取响应里的 `content_url` 下载视频。状态可能是 `queued`、`running`、
 `completed` 或 `failed`。任务执行期间 Dispatcher 会保持在途计数，阻止其它模型抢占 GPU。
 
+## 图生视频与 MP4 输出
+
+模型注册项设置 `i2v_video_workflow` 后，可在同一个接口传入 `input_image`。该值是 ComfyUI
+`input` 目录中的相对文件名，不接受绝对路径或 `..` 路径：
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/videos/generations \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model": "video-6000ada",
+    "input_image": "example.png",
+    "prompt": "The subject turns toward the camera, gentle natural motion",
+    "size": "512x512",
+    "frames": 17,
+    "fps": 8
+  }'
+```
+
+仓库提供的 Wan2.2 5B 图生视频工作流使用 ComfyUI 原生 `CreateVideo` 与 `SaveVideo`，
+固定输出 MP4/H.264，便于浏览器和常用播放器预览。
+
 ## 工作流模板
 
 仓库提供 Wan2.2 5B 与 Wan2.2 Remix 双模型工作流样例。模板通过精确字符串占位值接收参数，

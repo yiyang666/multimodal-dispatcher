@@ -36,6 +36,7 @@ class Model:
     t2i_workflow: str | None = None
     i2i_workflow: str | None = None
     video_workflow: str | None = None
+    i2v_video_workflow: str | None = None
     # 空闲释放阈值（秒）：None=用全局 IDLE_TIMEOUT_SECONDS；0=永不自动空闲释放
     idle_timeout_seconds: float | None = None
     capabilities: tuple[str, ...] = ()
@@ -69,6 +70,7 @@ def load_models(path: str) -> dict[str, Model]:
             t2i_workflow=value.get("t2i_workflow"),
             i2i_workflow=value.get("i2i_workflow"),
             video_workflow=value.get("video_workflow"),
+            i2v_video_workflow=value.get("i2v_video_workflow"),
             idle_timeout_seconds=(
                 None if idle_raw is None else max(0.0, float(idle_raw))
             ),
@@ -666,12 +668,25 @@ async def video_generation(request: Request) -> dict[str, Any]:
     if model.kind != "comfyui" or "video_generation" not in model.capabilities:
         scheduler.finish_request()
         raise HTTPException(400, f"{model_id} is not a video generation model")
-    if not model.video_workflow:
+    input_image = payload.get("input_image")
+    if input_image is not None:
+        if not isinstance(input_image, str) or not input_image.strip():
+            scheduler.finish_request()
+            raise HTTPException(400, "input_image must be a non-empty string")
+        input_path = Path(input_image)
+        if input_path.is_absolute() or ".." in input_path.parts:
+            scheduler.finish_request()
+            raise HTTPException(400, "input_image must be relative to the ComfyUI input directory")
+        input_image = input_path.as_posix()
+
+    workflow_path = model.i2v_video_workflow if input_image else model.video_workflow
+    if not workflow_path:
         scheduler.finish_request()
-        raise HTTPException(503, f"{model_id} has no video_workflow configured")
+        mode = "i2v_video_workflow" if input_image else "video_workflow"
+        raise HTTPException(503, f"{model_id} has no {mode} configured")
 
     try:
-        workflow = _load_comfy_workflow("COMFY_VIDEO_WORKFLOW", model.video_workflow)
+        workflow = _load_comfy_workflow("COMFY_VIDEO_WORKFLOW", workflow_path)
         width, height = _parse_image_size(payload.get("size") or "832x480")
         steps = max(1, min(100, int(payload.get("steps", 20))))
         replacements = {
@@ -685,6 +700,7 @@ async def video_generation(request: Request) -> dict[str, Any]:
             "{{switch_step}}": max(1, steps // 2),
             "{{cfg_scale}}": float(payload.get("cfg_scale", 5.0)),
             "{{seed}}": int(payload.get("seed", uuid.uuid4().int % (2**31))),
+            "{{input_image}}": input_image or "",
         }
         workflow = _replace_workflow_values(workflow, replacements)
     except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
