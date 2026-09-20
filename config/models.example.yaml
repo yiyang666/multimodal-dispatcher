@@ -20,6 +20,16 @@ models:
     sleep_supported: false
     capabilities: [text]
 
+  # llama.cpp 示例：单模型常驻进程，DFlash 等参数写在容器启动命令里，不写进本仓库。
+  local-llama-example:
+    kind: llamacpp
+    enabled: false
+    container: llama-server
+    base_url: http://llama-server:8080
+    readiness_path: /health
+    idle_timeout_seconds: 300
+    capabilities: [text]
+
   # Ollama 示例：对外 ID 不需要等于 Ollama 中的真实 tag。
   local-rp-example:
     kind: ollama

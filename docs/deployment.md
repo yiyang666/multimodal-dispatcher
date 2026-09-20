@@ -117,7 +117,7 @@ cp config/models.example.yaml config/models.yaml
 ```yaml
 models:
   my-agent:
-    kind: vllm                 # vllm、ollama 或 comfyui
+    kind: vllm                 # vllm、ollama、llamacpp 或 comfyui
     enabled: true              # false 表示预留但不可调用
     container: my-agent        # 已创建的 Docker 容器名
     base_url: http://my-agent:8000
@@ -131,6 +131,7 @@ models:
 - `base_url` 使用 Docker 网络内的容器名和容器端口，不是宿主机映射端口。
 - vLLM 的 `sleep_supported` 只有在实际验证 Sleep Mode 可用后才能打开（见 `docs/branches.md`）。
 - Ollama 可用 `upstream_model` 指向真实模型 tag，并设置 `release: ollama_unload`；对外 ID 可保持稳定。
+- llama.cpp（`kind: llamacpp`）对外仍走 `/v1/chat/completions`。权重、上下文和 DFlash 写在该容器的启动命令里，示例见 `deploy/llama-compose.yaml`；默认 `release: stop`，不要开 `sleep_supported`。
 - Sleep 是配置项，不是分支：WSL CuMem 失败时在同一 `develop` 上挂载
   `deploy/vllm-patches/`，不要只改 YAML。
 - ComfyUI 的释放策略固定优先调用 `/free`。

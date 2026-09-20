@@ -116,6 +116,15 @@ class ModelConfigTests(unittest.TestCase):
         self.assertEqual(model.release, "ollama_unload")
         self.assertEqual(model.upstream_model, "example-model:latest")
 
+    def test_llamacpp_defaults_to_stop_release(self) -> None:
+        models = load_models(
+            str(Path(__file__).parents[1] / "config" / "models.example.yaml")
+        )
+        model = models["local-llama-example"]
+        self.assertEqual(model.kind, "llamacpp")
+        self.assertEqual(model.release, "stop")
+        self.assertEqual(model.readiness_path, "/health")
+
     def test_video_workflow_placeholders_preserve_types(self) -> None:
         workflow = {
             "prompt": "{{prompt}}",

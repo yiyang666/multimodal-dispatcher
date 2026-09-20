@@ -74,14 +74,15 @@ sequenceDiagram
 
 切换过程对调用方透明。冷启动时第一次请求会等待模型加载；同一模型的后续请求可并发并直接
 转发。最后一个请求结束后开始空闲计时：vLLM 可进入 Sleep Mode，若环境不支持则停止容器；
-ComfyUI 调用 `/free` 卸载模型但保留服务进程。
+Ollama 只卸载权重、保留容器；llama.cpp 停止容器以释放显存；ComfyUI 调用 `/free`
+卸载模型但保留服务进程。
 
 ## 支持的接口与后端
 
 | API | 后端 | 说明 |
 | --- | --- | --- |
 | `GET /v1/models` | Dispatcher | 返回已启用的稳定模型 ID |
-| `POST /v1/chat/completions` | vLLM | 普通与 SSE 流式响应透传 |
+| `POST /v1/chat/completions` | vLLM / Ollama / llama.cpp | 普通与 SSE 流式响应透传 |
 | `POST /v1/images/generations` | ComfyUI | 固定 API 工作流的文生图适配 |
 | `POST /v1/images/edits` | ComfyUI | JSON + base64 图片的图生图适配 |
 | `POST /v1/videos/generations` | ComfyUI | 异步提交固定 API 工作流的视频生成任务 |

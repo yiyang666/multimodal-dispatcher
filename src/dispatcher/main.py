@@ -31,6 +31,7 @@ class Model:
     # 对外稳定 ID 与后端实际模型名解耦（例如 Ollama tag）。
     upstream_model: str | None = None
     # stop | vllm_sleep | comfy_free | ollama_unload；省略时按 kind 推导。
+    # llamacpp 默认 stop：模型在进程启动时加载，停容器才释放显存。
     release: str = "stop"
     # Comfy 工作流：按模型绑定不同 API template（缺省走全局 env / Qwen）
     t2i_workflow: str | None = None
@@ -497,7 +498,8 @@ async def chat_completions(request: Request) -> Response:
         raise HTTPException(400, "model is required")
     scheduler: Scheduler = request.app.state.scheduler
     model = await scheduler.activate(model_id, reserve=True)
-    if model.kind not in {"vllm", "ollama"}:
+    # 文本对话只转给这三类；comfyui 走图像/视频接口
+    if model.kind not in {"vllm", "ollama", "llamacpp"}:
         scheduler.finish_request()
         raise HTTPException(400, f"{model_id} is not a chat model")
     if model.upstream_model:

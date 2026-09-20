@@ -1,0 +1,46 @@
+# llama.cpp 文本后端示例。复制后改模型文件名；不要把生产机绝对路径提交进仓库。
+# 镜像需含 Muse 架构（llama.cpp b10353+）。Blackwell 用 CUDA 13 标签。
+name: llm-stack
+
+services:
+  llama-server:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda13
+    container_name: llama-server
+    restart: "no"
+    gpus: all
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks:
+      - backplane
+    volumes:
+      - "${LLAMA_MODELS:-./models}:/models:ro"
+    command:
+      - -m
+      - /models/model.gguf
+      - -md
+      - /models/draft.gguf
+      - --spec-type
+      - draft-dflash
+      - --spec-draft-n-max
+      - "15"
+      - -ngl
+      - "99"
+      - -ngld
+      - "99"
+      # 原生上下文 128K。262K 会明显拖慢吐字。
+      - -c
+      - "131072"
+      - -np
+      - "1"
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --jinja
+      - --chat-template-kwargs
+      - '{"reasoning_strength":"low"}'
+
+networks:
+  backplane:
+    name: llm-backplane
+    external: true

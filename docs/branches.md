@@ -115,7 +115,7 @@ docker compose up -d --build
 
 ## Sleep Mode 不是分支，是 vLLM 配置
 
-Sleep 只对 **`kind: vllm`** 有意义。ComfyUI / Ollama 用各自的 `release` 策略，不要为它们开 `sleep_supported`。
+Sleep 只对 **`kind: vllm`** 有意义。ComfyUI / Ollama / llama.cpp 用各自的 `release` 策略，不要为它们开 `sleep_supported`。llama.cpp 默认停容器。
 
 | 场景 | 做法 |
 |------|------|
