@@ -53,25 +53,26 @@ models:
     idle_timeout_seconds: 300
     capabilities: [image_generation]
 
-  # 5090 侧示例：SDXL NSFW 路由（与 Comfy 共用容器，靠 t2i_workflow 区分）
-  5090-sdxl-nsfw-jug:
+  # 5090 侧示例：SDXL 路由（与 Comfy 共用容器，靠 workflow 区分）
+  5090-sdxl-jug:
     kind: comfyui
     enabled: false
-    container: comfy-5090-qwen-image
-    base_url: http://comfy-5090-qwen-image:8188
+    container: comfy-5090
+    base_url: http://comfy-5090:8188
     readiness_path: /system_stats
     t2i_workflow: /app/workflows/sdxl_jug_t2i_api.json
     i2i_workflow: /app/workflows/sdxl_jug_i2i_api.json
     idle_timeout_seconds: 300
     capabilities: [image_generation]
 
-  5090-sdxl-nsfw-ill:
+  5090-sdxl-ill:
     kind: comfyui
     enabled: false
-    container: comfy-5090-qwen-image
-    base_url: http://comfy-5090-qwen-image:8188
+    container: comfy-5090
+    base_url: http://comfy-5090:8188
     readiness_path: /system_stats
     t2i_workflow: /app/workflows/sdxl_ill_t2i_api.json
+    i2i_workflow: /app/workflows/sdxl_ill_i2i_api.json
     idle_timeout_seconds: 300
     capabilities: [image_generation]
 

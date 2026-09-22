@@ -671,6 +671,10 @@ async def video_generation(request: Request) -> dict[str, Any]:
         scheduler.finish_request()
         raise HTTPException(400, f"{model_id} is not a video generation model")
     input_image = payload.get("input_image")
+    image_b64 = payload.get("image") or payload.get("image_b64") or payload.get("b64_json")
+    if input_image is not None and image_b64 is not None:
+        scheduler.finish_request()
+        raise HTTPException(400, "pass either input_image or image, not both")
     if input_image is not None:
         if not isinstance(input_image, str) or not input_image.strip():
             scheduler.finish_request()
@@ -680,6 +684,24 @@ async def video_generation(request: Request) -> dict[str, Any]:
             scheduler.finish_request()
             raise HTTPException(400, "input_image must be relative to the ComfyUI input directory")
         input_image = input_path.as_posix()
+    elif image_b64 is not None:
+        # MCP / 客户端主通路：base64 上传到 Comfy input，再走 i2v
+        try:
+            image_bytes = _decode_image_bytes({"image": image_b64})
+        except HTTPException:
+            scheduler.finish_request()
+            raise
+        client: httpx.AsyncClient = request.app.state.proxy
+        try:
+            input_image = await _comfy_upload_image(
+                client,
+                model.base_url,
+                image_bytes,
+                filename=f"video_{uuid.uuid4().hex}.png",
+            )
+        except HTTPException:
+            scheduler.finish_request()
+            raise
 
     workflow_path = model.i2v_video_workflow if input_image else model.video_workflow
     if not workflow_path:
